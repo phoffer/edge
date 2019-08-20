@@ -1,6 +1,6 @@
 module Edge
   module Jungle
-    # acts_as_jungle models a tree/multi-tree structure.
+    # acts_as_jungle models a branch/multi-branch structure.
     module ActsAsJungle
       # options:
       #
@@ -9,32 +9,38 @@ module Edge
       # * order - how to order children (default: none)
       # * optional - passed to belongs_to (default: none)
       def acts_as_jungle(options={})
-        options.assert_valid_keys :foreign_key, :order, :dependent, :optional
+        options.assert_valid_keys :foreign_key, :order, :dependent, :optional, :prefix
+        prefix = options[:prefix]
+        method_prefix = prefix ? prefix.to_s + ?_ : ''
 
-        class_attribute :jungle_foreign_key
-        self.jungle_foreign_key = options[:foreign_key] || "parent_id"
+        unless self.respond_to? :jungle_foreign_keys
+          class_attribute :jungle_foreign_keys
+          class_attribute :jungle_orders
+          self.jungle_foreign_keys  ||= {}
+          self.jungle_orders        ||= {}
+        end
 
-        class_attribute :jungle_order
-        self.jungle_order = options[:order] || nil
+        self.jungle_foreign_keys[prefix]  = options[:foreign_key] || "parent_id"
+        self.jungle_orders[prefix]        = options[:order] || nil
 
         common_options = {
           :class_name => self.name,
-          :foreign_key => jungle_foreign_key
+          :foreign_key => jungle_foreign_keys[prefix]
         }
 
         dependent_options = options[:dependent] ? { dependent: options[:dependent] } : {}
 
         optional_options = options[:optional] ? { optional: options[:optional] } : {}
 
-        belongs_to :parent, common_options.merge(inverse_of: :children).merge(optional_options)
+        belongs_to "#{method_prefix}parent".to_sym, common_options.merge(inverse_of: "#{method_prefix}children".to_sym).merge(optional_options)
 
-        if jungle_order
-          has_many :children, -> { order(jungle_order) }, common_options.merge(inverse_of: :parent).merge(dependent_options)
+        if jungle_orders[prefix]
+          has_many "#{method_prefix}children".to_sym, -> { order(jungle_orders[prefix]) }, common_options.merge(inverse_of: "#{method_prefix}parent".to_sym).merge(dependent_options)
         else
-          has_many :children, common_options.merge(inverse_of: :parent).merge(dependent_options)
+          has_many "#{method_prefix}children".to_sym, common_options.merge(inverse_of: "#{method_prefix}parent".to_sym).merge(dependent_options)
         end
 
-        scope :root, -> { where(jungle_foreign_key => nil) }
+        scope "#{method_prefix}root".to_sym, -> { where(jungle_foreign_keys[prefix] => nil) }
 
         include Edge::Jungle::InstanceMethods
         extend Edge::Jungle::ClassMethods
@@ -84,18 +90,18 @@ module Edge
         top_level_records
       end
 
-      # Finds an a tree or trees by id.
+      # Finds an a branch or branches by id.
       #
       # If any requested ids are not found it raises
       # ActiveRecord::RecordNotFound.
-      def find_tree(id_or_ids)
-        trees = where(:id => id_or_ids).find_jungle
+      def find_branch(id_or_ids)
+        branches = where(:id => id_or_ids).find_jungle
         if id_or_ids.kind_of?(Array)
-          raise ActiveRecord::RecordNotFound unless trees.size == id_or_ids.size
-          trees
+          raise ActiveRecord::RecordNotFound unless branches.size == id_or_ids.size
+          branches
         else
-          raise ActiveRecord::RecordNotFound if trees.empty?
-          trees.first
+          raise ActiveRecord::RecordNotFound if branches.empty?
+          branches.first
         end
       end
 
